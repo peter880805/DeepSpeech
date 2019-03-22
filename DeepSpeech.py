@@ -85,12 +85,19 @@ def dense(name, x, units, dropout_rate=None, relu=True):
 def rnn_impl_cudnn_rnn(x, seq_length, previous_state, reuse):
     assert previous_state is None # 'Passing previous state not supported with CuDNN backend'
 
+    if FLAGS.rnn_cell == 'lstm':
+        cell_type = tf.contrib.cudnn_rnn.CudnnLSTM
+    elif FLAGS.rnn_cell == 'gru':
+        cell_type = tf.contrib.cudnn_rnn.CudnnGRU
+    else:
+        log_error('Invalid RNN cell type: {}'.format(FLAGS.rnn_cell))
+
     # Forward direction cell:
-    fw_cell = tf.contrib.cudnn_rnn.CudnnLSTM(num_layers=1,
-                                             num_units=Config.n_cell_dim,
-                                             input_mode='skip_input',
-                                             direction='unidirectional',
-                                             dtype=tf.float32)
+    fw_cell = cell_type(num_layers=FLAGS.n_layers,
+                        num_units=Config.n_cell_dim,
+                        input_mode='auto_select',
+                        direction='unidirectional',
+                        dtype=tf.float32)
 
     output, output_state = fw_cell(inputs=x,
                                    dtype=tf.float32,
@@ -100,8 +107,17 @@ def rnn_impl_cudnn_rnn(x, seq_length, previous_state, reuse):
 
 
 def rnn_impl_lstmblockcell(x, seq_length, previous_state, reuse):
+    if FLAGS.rnn_cell == 'lstm':
+        cell_type = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell
+    elif FLAGS.rnn_cell == 'gru':
+        cell_type = tf.contrib.cudnn_rnn.CudnnCompatibleGRUCell
+    else:
+        log_error('Invalid RNN cell type: {}'.format(FLAGS.rnn_cell))
+
     # Forward direction cell:
-    fw_cell = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(Config.n_cell_dim, reuse=reuse)
+    def cell():
+        return cell_type(Config.n_cell_dim, reuse=reuse)
+    fw_cell = tf.nn.rnn_cell.MultiRNNCell([cell() for _ in range(FLAGS.n_layers)])
 
     output, output_state = tf.nn.dynamic_rnn(cell=fw_cell,
                                              inputs=x,
@@ -153,12 +169,12 @@ def create_model(batch_x, seq_length, dropout, reuse=False, previous_state=None,
     # clipped RELU activation and dropout.
 
     layers['layer_1'] = layer_1 = dense('layer_1', batch_x, Config.n_hidden_1)
-    layers['layer_2'] = layer_2 = dense('layer_2', layer_1, Config.n_hidden_2)
-    layers['layer_3'] = layer_3 = dense('layer_3', layer_2, Config.n_hidden_3)
+    # layers['layer_2'] = layer_2 = dense('layer_2', layer_1, Config.n_hidden_2)
+    # layers['layer_3'] = layer_3 = dense('layer_3', layer_2, Config.n_hidden_3)
 
     # `layer_3` is now reshaped into `[n_steps, batch_size, 2*n_cell_dim]`,
     # as the LSTM RNN expects its input to be of shape `[max_time, batch_size, input_size]`.
-    layer_3 = tf.reshape(layer_3, [-1, batch_size, Config.n_hidden_3])
+    layer_3 = tf.reshape(layer_1, [-1, batch_size, Config.n_hidden_1])
 
     # Run through parametrized RNN implementation, as we use different RNNs
     # for training and inference
@@ -181,6 +197,17 @@ def create_model(batch_x, seq_length, dropout, reuse=False, previous_state=None,
     # Note, that this differs from the input in that it is time-major.
     layer_6 = tf.reshape(layer_6, [-1, batch_size, Config.n_hidden_6], name='raw_logits')
     layers['raw_logits'] = layer_6
+
+    total_parameters = 0
+    for variable in tf.trainable_variables():
+        # shape is an array of tf.Dimension
+        shape = variable.get_shape()
+        variable_parameters = 1
+        for dim in shape:
+            variable_parameters *= dim.value
+        total_parameters += variable_parameters
+    print('PARAMS:', total_parameters)
+    # exit(0)
 
     # Output shape: [n_steps, batch_size, n_hidden_6]
     return layer_6, layers

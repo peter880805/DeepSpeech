@@ -19,22 +19,28 @@ fis="${data}/LDC/fisher"
 swb="${data}/LDC/LDC97S62/swb"
 lbs="${data}/OpenSLR/LibriSpeech/librivox"
 
+mv ../keep/fis-swb-lbs.data-00000-of-00001 /dotdot
+mv ../keep/fis-swb-lbs.index /dotdot
+
 python3 -u DeepSpeech.py \
   --train_files "${fis}-train.csv","${swb}-train.csv","${lbs}-train-clean-100.csv","${lbs}-train-clean-360.csv","${lbs}-train-other-500.csv" \
   --dev_files "${lbs}-dev-clean.csv"\
   --test_files "${lbs}-test-clean.csv" \
-  --train_batch_size 24 \
-  --dev_batch_size 48 \
-  --test_batch_size 48 \
+  --train_batch_size 64 \
+  --dev_batch_size 256 \
+  --test_batch_size 256 \
   --n_hidden 2048 \
   --learning_rate 0.0001 \
   --dropout_rate 0.15 \
   --epoch 3 \
+  --n_layers 1 \
+  --rnn_cell "lstm" \
   --display_step 0 \
   --validation_step 1 \
   --noearly_stop \
   --checkpoint_dir "/dotdot/ckpt" \
   --summary_dir "/dotdot/summaries" \
-  --train_cached_features_path "/dotdot/fis-swb-lbs"
+  --train_cached_features_path "/dotdot/fis-swb-lbs" \
+  --use_cudnn_rnn
 
-cp -R /dotdot/* ../keep
+# cp -R /dotdot/* ../keep
